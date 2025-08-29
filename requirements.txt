@@ -1,0 +1,6 @@
+streamlit
+pandas
+openpyxl
+altair
+folium>=0.15.0
+streamlit-folium>=0.15.0
