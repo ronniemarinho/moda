@@ -106,7 +106,7 @@ CIRC_LABELS = {
 # A) Perfil dos participantes
 # =============================
 st.header("A) Perfil dos participantes")
-perfil_cols = [COL_GENERO, COL_IDADE, COL_ESCOLAR, COL_RENDA, COL_CIDADE]
+perfil_cols = [COL_GENERO, COL_IDADE, COL_ESCOLAR, COL_RENDA]
 for col in perfil_cols:
     st.subheader(col)
     tb = vc_table(df[col])
