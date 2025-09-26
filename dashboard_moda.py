@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import altair as alt
 from io import BytesIO
-import matplotlib.pyplot as plt
+
 
 # =============================
 # Configuração da página
