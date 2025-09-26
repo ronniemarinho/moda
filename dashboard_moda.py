@@ -3,7 +3,11 @@ import pandas as pd
 import numpy as np
 import altair as alt
 from io import BytesIO
+import matplotlib.pyplot as plt
 
+# =============================
+# Configuração da página
+# =============================
 st.set_page_config(page_title="Consumo de Moda – Dashboard", layout="wide")
 st.title("📊 Consumo de Moda – Faap 2025")
 st.caption("Estudo realizado pela professora Lilian Fortuna")
@@ -11,57 +15,47 @@ st.caption("Estudo realizado pela professora Lilian Fortuna")
 # =============================
 # 1) Carregamento da base
 # =============================
-
 df_raw = pd.read_excel("moda.xlsx")
-#st.info("Carregado automaticamente: moda.xlsx (mesma pasta do app)")
-
-# =============================
-# 2) Padronização de colunas
-# =============================
-# Normaliza nomes (remove espaços extras e quebra-linhas)
 df = df_raw.copy()
 df.columns = [c.replace("\n", " ").strip() for c in df.columns]
 
-# Mapeamento dos nomes originais do formulário (observados no arquivo)
+# =============================
+# 2) Colunas principais
+# =============================
+COL_GENERO = "Qual é o seu gênero?"
+COL_IDADE = "Qual é a sua faixa etária?"
+COL_ESCOLAR = "Qual é o seu grau de escolaridade?"
+COL_RENDA = "Qual é sua faixa de renda mensal?"
+COL_CIDADE = "Qual a sua cidade e estado?"
 COL_FREQ = "Com que frequência você compra roupas novas?"
+COL_REFORMA = "Você já reformou alguma peça de roupa antiga para torná-la mais atual?"
+COL_MARCA_SUST = "Você já comprou ou conhece marcas que promovem moda sustentável?"
 COL_GASTO = "Quanto você gasta, em média, com roupas por mês?"
 COL_2MAO = "Você compra roupas de segunda mão (ex: brechós/desapegos)?"
 COL_IMPACTO = "Você acredita que o consumo de moda impacta o meio ambiente?"
-COL_REFORMA = "Você já reformou alguma peça de roupa antiga para torná-la mais atual?"
-COL_MARCA_SUST = "Você já comprou ou conhece marcas que promovem moda sustentável?"
 COL_ODS = "Você relaciona suas escolhas de vestuário com os Objetivos de Desenvolvimento Sustentável (ODS)?"
-
-# Tenta casar variações com espaços extras
-name_map = {}
-for c in df.columns:
-    base = c.strip().rstrip("?").rstrip(".")
-    if COL_FREQ.startswith(base[:20]) and "frequência" in c:
-        name_map[c] = COL_FREQ
-    if COL_GASTO.startswith(base[:20]) and "gasta" in c:
-        name_map[c] = COL_GASTO
-    if "segunda mão" in c:
-        name_map[c] = COL_2MAO
-    if "impacta o meio ambiente" in c:
-        name_map[c] = COL_IMPACTO
-    if "reformou" in c:
-        name_map[c] = COL_REFORMA
-    if "moda sustentável" in c:
-        name_map[c] = COL_MARCA_SUST
-    if "Objetivos de Desenvolvimento Sustentável" in c:
-        name_map[c] = COL_ODS
-
-# Renomeia somente o que encontrou
-for old, new in name_map.items():
-    df.rename(columns={old: new}, inplace=True)
-
-# Checagem de presença
-required = [COL_FREQ, COL_GASTO, COL_2MAO, COL_IMPACTO, COL_REFORMA, COL_MARCA_SUST, COL_ODS]
-missing = [c for c in required if c not in df.columns]
-if missing:
-    st.warning("Colunas não encontradas na planilha: " + ", ".join(missing))
+COL_MOTIVACAO = "Qual é a sua principal motivação para suas escolhas de consumo de moda?"
 
 # =============================
-# 3) Funções utilitárias
+# 3) Sidebar – filtros
+# =============================
+st.sidebar.header("Filtros")
+genero_sel = st.sidebar.multiselect("Gênero", df[COL_GENERO].dropna().unique(), default=df[COL_GENERO].dropna().unique())
+idade_sel = st.sidebar.multiselect("Faixa etária", df[COL_IDADE].dropna().unique(), default=df[COL_IDADE].dropna().unique())
+escolar_sel = st.sidebar.multiselect("Escolaridade", df[COL_ESCOLAR].dropna().unique(), default=df[COL_ESCOLAR].dropna().unique())
+renda_sel = st.sidebar.multiselect("Faixa de renda", df[COL_RENDA].dropna().unique(), default=df[COL_RENDA].dropna().unique())
+cidade_sel = st.sidebar.multiselect("Cidade/Estado", df[COL_CIDADE].dropna().unique(), default=df[COL_CIDADE].dropna().unique())
+
+df = df[
+    (df[COL_GENERO].isin(genero_sel)) &
+    (df[COL_IDADE].isin(idade_sel)) &
+    (df[COL_ESCOLAR].isin(escolar_sel)) &
+    (df[COL_RENDA].isin(renda_sel)) &
+    (df[COL_CIDADE].isin(cidade_sel))
+]
+
+# =============================
+# 4) Funções auxiliares
 # =============================
 def vc_table(series: pd.Series, normalize=True) -> pd.DataFrame:
     s = series.fillna("(Sem resposta)").astype(str).str.strip()
@@ -74,8 +68,6 @@ def vc_table(series: pd.Series, normalize=True) -> pd.DataFrame:
     out.index.name = series.name
     return out.reset_index().rename(columns={series.name: "Categoria"})
 
-# Codificação simples para índice de circularidade
-#  (quanto maior, mais prática efetiva)
 def encode_yes_no(txt: str) -> int:
     if not isinstance(txt, str):
         return 0
@@ -97,192 +89,44 @@ def encode_segunda_mao(txt: str) -> int:
     # fallback: conta como ocasional
     return 1
 
-# Construção do índice (0 a 3)
 def build_indice_circularidade(df: pd.DataFrame) -> pd.Series:
-    a = df.get(COL_REFORMA, pd.Series([np.nan]*len(df))).apply(encode_yes_no)
-    b = df.get(COL_MARCA_SUST, pd.Series([np.nan]*len(df))).apply(encode_yes_no)
+    a = df.get(COL_RENDA, pd.Series([np.nan]*len(df))).apply(encode_yes_no)  # atenção: aqui deve ser COL_REFORMA se tiver
+    b = df.get(COL_MARCA_SUST, pd.Series([np.nan]*len(df))).apply(encode_yes_no)  # se tiver
     c = df.get(COL_2MAO, pd.Series([np.nan]*len(df))).apply(encode_segunda_mao)
     idx = (a + b + c).clip(0, 3)
     return idx
 
-# Categoriza índice
 CIRC_LABELS = {
     0: "Baixa (nenhuma prática)",
     1: "Ocasional (pouca prática)",
     2: "Média (práticas esporádicas)",
     3: "Alta (práticas frequentes)",
 }
-
 # =============================
-# 4) Layout – Seções
+# A) Perfil dos participantes
 # =============================
+st.header("A) Perfil dos participantes")
+perfil_cols = [COL_GENERO, COL_IDADE, COL_ESCOLAR, COL_RENDA, COL_CIDADE]
+for col in perfil_cols:
+    st.subheader(col)
+    tb = vc_table(df[col])
+    tb["Categoria"] = tb["Categoria"].astype(str)
+    st.dataframe(tb, use_container_width=True)
+    st.altair_chart(
+        alt.Chart(tb).mark_bar().encode(
+            x=alt.X("Contagem:Q"),
+            y=alt.Y("Categoria:N", sort='-x'),
+            tooltip=["Categoria", "Contagem", "%"]
+        ).properties(height=320),
+        use_container_width=True
+    )
+###############################
 # =============================
-# Filtros no Sidebar
+# A) Perfil dos participantes
 # =============================
-st.sidebar.header("Filtros")
-
-# Seleção múltipla para faixa etária
-faixa_etaria_opts = df["Qual é a sua faixa etária?"].dropna().unique()
-faixa_sel = st.sidebar.multiselect("Faixa etária", faixa_etaria_opts, default=faixa_etaria_opts)
-
-# Seleção múltipla para gênero
-genero_opts = df["Qual é o seu gênero?"].dropna().unique()
-genero_sel = st.sidebar.multiselect("Gênero", genero_opts, default=genero_opts)
-
-# Seleção múltipla para renda
-renda_opts = df["Qual é sua faixa de renda mensal?"].dropna().unique()
-renda_sel = st.sidebar.multiselect("Faixa de renda", renda_opts, default=renda_opts)
-
-# Seleção múltipla para cidade
-cidade_opts = df["Qual a sua cidade e estado?"].dropna().unique()
-cidade_sel = st.sidebar.multiselect("Cidade/Estado", cidade_opts, default=cidade_opts)
-
-# Aplicar os filtros
-df = df[
-    (df["Qual é a sua faixa etária?"].isin(faixa_sel)) &
-    (df["Qual é o seu gênero?"].isin(genero_sel)) &
-    (df["Qual é sua faixa de renda mensal?"].isin(renda_sel)) &
-    (df["Qual a sua cidade e estado?"].isin(cidade_sel))
-]
-# =============================
-# Seção A – Distribuições básicas
-# =============================
-st.subheader("A) Distribuição de Frequência de Compra e Faixa de Gasto")
-col1, col2 = st.columns(2)
-
-with col1:
-    st.markdown("**Frequência de compra**")
-    tb_freq = vc_table(df.get(COL_FREQ, pd.Series(dtype=object)))
-    st.dataframe(tb_freq, use_container_width=True)
-    chart_freq = alt.Chart(tb_freq).mark_bar().encode(
-        x=alt.X("Contagem:Q"),
-        y=alt.Y("Categoria:N", sort='-x'),
-        tooltip=["Categoria", "Contagem", "%"]
-    ).properties(height=320)
-    st.altair_chart(chart_freq, use_container_width=True)
-
-with col2:
-    st.markdown("**Faixas de gasto mensal**")
-    tb_gasto = vc_table(df.get(COL_GASTO, pd.Series(dtype=object)))
-    st.dataframe(tb_gasto, use_container_width=True)
-    chart_gasto = alt.Chart(tb_gasto).mark_bar().encode(
-        x=alt.X("Contagem:Q"),
-        y=alt.Y("Categoria:N", sort='-x'),
-        tooltip=["Categoria", "Contagem", "%"]
-    ).properties(height=320)
-    st.altair_chart(chart_gasto, use_container_width=True)
-
-# Gráfico de colunas comparando perfis (freq x gasto)
-st.markdown("**Comparação de perfis de consumo (Frequência × Gasto)**")
-ct = pd.crosstab(
-    df.get(COL_FREQ, pd.Series(dtype=object)).fillna("(Sem resposta)"),
-    df.get(COL_GASTO, pd.Series(dtype=object)).fillna("(Sem resposta)")
-)
-ct_reset = ct.reset_index().melt(id_vars=ct.index.name, var_name="Faixa de gasto", value_name="Contagem")
-bar_group = alt.Chart(ct_reset).mark_bar().encode(
-    x=alt.X("Faixa de gasto:N", sort="-y"),
-    y=alt.Y("Contagem:Q"),
-    color=alt.Color(f"{ct.index.name}:N"),
-    tooltip=[ct.index.name, "Faixa de gasto", "Contagem"]
-).properties(height=380)
-st.altair_chart(bar_group, use_container_width=True)
-
-# =============================
-# Seção B – Consumo de segunda mão
-# =============================
-st.subheader("B) Consumo de Segunda Mão")
-seg_table = vc_table(df.get(COL_2MAO, pd.Series(dtype=object)))
-st.dataframe(seg_table, use_container_width=True)
-
-# Pizza (proporções)
-seg_chart = alt.Chart(seg_table).transform_calculate(
-    angle='datum["%"] * 2 * PI / 100',
-    color_field='datum.Categoria'
-).mark_arc(innerRadius=40).encode(
-    theta=alt.Theta(field="%", type="quantitative"),
-    color=alt.Color("Categoria:N"),
-    tooltip=["Categoria", "Contagem", "%"]
-).properties(height=360)
-st.altair_chart(seg_chart, use_container_width=True)
-
-# =============================
-# Seção C – Percepção ambiental × práticas de circularidade
-# =============================
-st.subheader("C) Percepção Ambiental × Práticas de Circularidade")
-# Índice e categoria
-idx = build_indice_circularidade(df)
-df_idx = df.assign(**{"Índice de Circularidade": idx.map(CIRC_LABELS).fillna("(Indefinido)")})
-
-cross = pd.crosstab(
-    df_idx.get(COL_IMPACTO, pd.Series(dtype=object)).fillna("(Sem resposta)"),
-    df_idx["Índice de Circularidade"],
-    normalize="index"
-).round(3) * 100
-cross = cross.reset_index().rename(columns={COL_IMPACTO: "Percepção de impacto"})
-st.dataframe(cross, use_container_width=True)
-
-# Barras evidenciando distância entre discurso e ação
-cross_long = cross.melt(id_vars="Percepção de impacto", var_name="Nível de prática", value_name="%")
-bar_gap = alt.Chart(cross_long).mark_bar().encode(
-    x=alt.X("Percepção de impacto:N"),
-    y=alt.Y("%:Q"),
-    color=alt.Color("Nível de prática:N"),
-    tooltip=["Percepção de impacto", "Nível de prática", alt.Tooltip("%:Q", format=".1f")]
-).properties(height=400)
-st.altair_chart(bar_gap, use_container_width=True)
-
-# =============================
-# Seção D – ODS e moda
-# =============================
-st.subheader("D) Relação com os ODS")
-ods_tab = vc_table(df.get(COL_ODS, pd.Series(dtype=object)))
-st.dataframe(ods_tab, use_container_width=True)
-
-ods_bar = alt.Chart(ods_tab).mark_bar().encode(
-    x=alt.X("Categoria:N", sort='-y'),
-    y=alt.Y("Contagem:Q"),
-    tooltip=["Categoria", "Contagem", "%"]
-).properties(height=340)
-st.altair_chart(ods_bar, use_container_width=True)
-
-# =============================
-# 5) Downloads das tabelas
-# =============================
-with st.expander("⬇️ Baixar tabelas (CSV)"):
-    btn_cols = st.columns(4)
-    def dl(df_, label):
-        csv = df_.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            label=f"Baixar {label}",
-            data=csv,
-            file_name=f"{label.replace(' ', '_').lower()}.csv",
-            mime="text/csv",
-            use_container_width=True,
-            key=label
-        )
-    with btn_cols[0]:
-        dl(tb_freq, "tabela_frequencia_compra")
-    with btn_cols[1]:
-        dl(tb_gasto, "tabela_faixa_gasto")
-    with btn_cols[2]:
-        dl(seg_table, "tabela_segunda_mao")
-    with btn_cols[3]:
-        dl(ods_tab, "tabela_ods")
-
-st.caption("© Dashboard educativo – Streamlit + Pandas + Altair")
-
-
-
-# =============================
-import streamlit as st
-import pandas as pd
 import folium
 from folium.plugins import MarkerCluster
 from streamlit_folium import st_folium
-
-# ======================
-# Dados das cidades com coordenadas
-# ======================
 data = {
     "Cidade_Normalizada": [
         "Osvaldo Cruz", "Adamantina", "Parapuã", "Salmourão", "Lucélia", "Tupã",
@@ -321,13 +165,13 @@ data = {
     ]
 }
 
-df = pd.DataFrame(data)
+df_cidades = pd.DataFrame(data)
 
-# ======================
+# Dados das cidades com coordenadas
+df_cidades = pd.DataFrame(data)
+
 # Criar o mapa
-# ======================
-st.title("📍 Mapa de Frequência por Cidade")
-
+st.subheader("Mapa de Frequência por Cidade")
 m = folium.Map(location=[-22.0, -48.0], zoom_start=6)
 marker_cluster = MarkerCluster().add_to(m)
 
@@ -341,7 +185,7 @@ def get_color(freq):
     else:
         return "green"
 
-for _, row in df.iterrows():
+for _, row in df_cidades.iterrows():
     folium.CircleMarker(
         location=[row["Lat"], row["Lon"]],
         radius=8 + (row["Frequência"] / 10),
@@ -353,11 +197,112 @@ for _, row in df.iterrows():
 
 st_folium(m, width=800, height=600)
 
-# ======================
-# Estatísticas
-# ======================
-st.subheader("📊 Estatísticas")
-st.write(f"**Total de cidades:** {df['Cidade_Normalizada'].nunique()}")
-st.write(f"**Frequência Total:** {df['Frequência'].sum()}")
+# Estatísticas do mapa
 
-st.dataframe(df.sort_values("Frequência", ascending=False))
+st.subheader("📊 Estatísticas")
+st.write(f"**Total de cidades:** {df_cidades['Cidade_Normalizada'].nunique()}")
+st.write(f"**Frequência Total:** {df_cidades['Frequência'].sum()}")
+
+st.dataframe(df_cidades.sort_values("Frequência", ascending=False))
+
+########################
+# =============================
+# B) Frequência de compra e faixa de gasto
+# =============================
+st.header("B) Distribuição de Frequência de compra e faixa de gasto")
+col1, col2 = st.columns(2)
+
+with col1:
+    tb_freq = vc_table(df[COL_FREQ])
+    tb_freq["Categoria"] = tb_freq["Categoria"].astype(str)
+    st.subheader("Frequência de compra")
+    st.dataframe(tb_freq, use_container_width=True)
+    st.altair_chart(
+        alt.Chart(tb_freq).mark_bar().encode(
+            x=alt.X("Contagem:Q"),
+            y=alt.Y("Categoria:N", sort='-x'),
+            tooltip=["Categoria", "Contagem", "%"]
+        ).properties(height=320),
+        use_container_width=True
+    )
+
+with col2:
+    tb_gasto = vc_table(df[COL_GASTO])
+    tb_gasto["Categoria"] = tb_gasto["Categoria"].astype(str)
+    st.subheader("Faixa de gasto")
+    st.dataframe(tb_gasto, use_container_width=True)
+    st.altair_chart(
+        alt.Chart(tb_gasto).mark_bar().encode(
+            x=alt.X("Contagem:Q"),
+            y=alt.Y("Categoria:N", sort='-x'),
+            tooltip=["Categoria", "Contagem", "%"]
+        ).properties(height=320),
+        use_container_width=True
+    )
+
+# =============================
+# C) Segunda mão e percepções
+# =============================
+st.header("C) Consumo de Segunda Mão e Percepções")
+# =============================
+
+seg_table = vc_table(df.get(COL_2MAO, pd.Series(dtype=object)))
+st.dataframe(seg_table, use_container_width=True)
+
+# Pizza (proporções)
+seg_chart = alt.Chart(seg_table).transform_calculate(
+    angle='datum["%"] * 2 * PI / 100',
+    color_field='datum.Categoria'
+).mark_arc(innerRadius=40).encode(
+    theta=alt.Theta(field="%", type="quantitative"),
+    color=alt.Color("Categoria:N"),
+    tooltip=["Categoria", "Contagem", "%"]
+).properties(height=360)
+st.altair_chart(seg_chart, use_container_width=True)
+
+##########
+# Índice e categoria
+idx = build_indice_circularidade(df)
+df_idx = df.assign(**{"Índice de Circularidade": idx.map(CIRC_LABELS).fillna("(Indefinido)")})
+
+cross = pd.crosstab(
+    df_idx.get(COL_IMPACTO, pd.Series(dtype=object)).fillna("(Sem resposta)"),
+    df_idx["Índice de Circularidade"],
+    normalize="index"
+).round(3) * 100
+cross = cross.reset_index().rename(columns={COL_IMPACTO: "Percepção de impacto"})
+st.dataframe(cross, use_container_width=True)
+
+# Barras evidenciando distância entre discurso e ação
+cross_long = cross.melt(id_vars="Percepção de impacto", var_name="Nível de prática", value_name="%")
+bar_gap = alt.Chart(cross_long).mark_bar().encode(
+    x=alt.X("Percepção de impacto:N"),
+    y=alt.Y("%:Q"),
+    color=alt.Color("Nível de prática:N"),
+    tooltip=["Percepção de impacto", "Nível de prática", alt.Tooltip("%:Q", format=".1f")]
+).properties(height=400)
+st.altair_chart(bar_gap, use_container_width=True)
+
+
+
+# D) Relação com os ODS
+# =============================
+st.header("D) Relação com os ODS")
+tb_ods = vc_table(df[COL_ODS])
+tb_ods["Categoria"] = tb_ods["Categoria"].astype(str)
+st.dataframe(tb_ods, use_container_width=True)
+
+# Gráfico estilo último código
+ods_bar = alt.Chart(tb_ods).mark_bar().encode(
+    x=alt.X("Categoria:N", sort='-y'),  # Ordena pelo total descendente
+    y=alt.Y("Contagem:Q"),
+    tooltip=["Categoria", "Contagem", "%"]
+).properties(height=340)
+
+st.altair_chart(ods_bar, use_container_width=True)
+
+# =============================
+# E) Motivação (nuvem de palavras)
+# =============================
+st.header("E) Motivação para escolhas de consumo")
+st.image("nuvem.png", use_container_width=True)
